@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="en">
+
+  <head>
+    <meta charset="UTF-8">
+    <title>Untitled</title>
+    
+
+  </head>
+    
+  <body>
+  <!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Generative Mesh Terrain & Spaceship</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/simplex-noise/2.4.0/simplex-noise.min.js"></script>
+    <style>
+        :root {
+            --bg-color: #050505;
+            --text-muted: #888;
+            --panel-bg: rgba(15, 15, 15, 0.85);
+            --border-color: #333;
+            --main-color: #ff6600; /* 用于全局动态绑定的 CSS 变量 */
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: var(--bg-color);
+            color: var(--main-color);
+            font-family: 'Courier New', Courier, monospace;
+            overflow: hidden;
+            font-size: 12px;
+            /* 阻止移动端双击缩放和长按选中 */
+            touch-action: manipulation;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+
+        /* Canvas 容器 */
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            cursor: crosshair;
+        }
+
+        /* 顶部右侧全局控制按钮 */
+        #top-controls {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            display: flex;
+            gap: 10px;
+            z-index: 20;
+        }
+
+        .icon-btn {
+            background: rgba(5, 5, 5, 0.6);
+            border: 1px solid var(--border-color);
+            color: var(--text-muted);
+            width: 32px;
+            height: 32px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(4px);
+        }
+
+        .icon-btn:hover, .icon-btn:active {
+            border-color: var(--main-color);
+            color: var(--main-color);
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+        }
+
+        /* 右侧控制面板 (增加滑动动画) */
+        #sidebar {
+            position: absolute;
+            right: 20px;
+            top: 70px;
+            width: 280px;
+            max-width: 80vw;
+            max-height: calc(100vh - 100px);
+            overflow-y: auto;
+            background-color: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            z-index: 10;
+            backdrop-filter: blur(4px);
+            /* 默认隐藏并移出屏幕 */
+            transform: translateX(120%);
+            opacity: 0;
+            transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease;
+        }
+
+        #sidebar.visible {
+            transform: translateX(0);
+            opacity: 1;
+        }
+
+        /* 滚动条隐藏适配 */
+        #sidebar::-webkit-scrollbar { width: 4px; }
+        #sidebar::-webkit-scrollbar-thumb { background: var(--border-color); }
+
+        .panel-section {
+            border: 1px solid var(--border-color);
+            padding: 12px;
+        }
+
+        .section-title {
+            color: white;
+            font-weight: bold;
+            margin-top: -22px;
+            background: var(--bg-color);
+            display: inline-block;
+            padding: 0 8px;
+            margin-bottom: 12px;
+        }
+
+        .control-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .control-label { color: var(--text-muted); text-transform: uppercase; font-size: 11px; }
+
+        /* 模拟数字输入框和按钮 */
+        .input-group { display: flex; align-items: center; gap: 5px; }
+        
+        button.adj-btn {
+            background: none;
+            border: 1px solid var(--border-color);
+            color: inherit;
+            cursor: pointer;
+            width: 22px;
+            height: 22px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        button.adj-btn:hover { background: var(--border-color); color: white; }
+
+        input[type="text"] {
+            background: black;
+            border: 1px solid var(--border-color);
+            color: inherit;
+            font-family: inherit;
+            font-size: 12px;
+            width: 50px;
+            text-align: right;
+            padding: 2px 4px;
+        }
+
+        select { 
+            background: black;
+            border: 1px solid var(--border-color);
+            color: inherit;
+            font-family: inherit;
+            font-size: 11px;
+            width: 100px; 
+            text-align: left; 
+            padding: 2px;
+        }
+
+        /* 颜色选择器样式重置 */
+        input[type="color"] {
+            -webkit-appearance: none;
+            border: 1px solid var(--border-color);
+            width: 20px;
+            height: 20px;
+            padding: 0;
+            background: none;
+            cursor: pointer;
+        }
+        input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+        input[type="color"]::-webkit-color-swatch { border: none; }
+
+        .toggle-btn {
+            background: var(--border-color);
+            color: white;
+            border: none;
+            padding: 4px 8px;
+            cursor: pointer;
+            width: 65px;
+            font-weight: bold;
+            font-size: 11px;
+        }
+        .toggle-btn.on {
+            background: var(--main-color); 
+            color: black;
+        }
+
+        /* 离线屏效 */
+        #offline-screen {
+            display: none;
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: black;
+            color: var(--main-color);
+            align-items: center;
+            justify-content: center;
+            font-size: clamp(20px, 4vw, 40px);
+            font-weight: bold;
+            letter-spacing: 4px;
+            z-index: 100;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="top-controls">
+        <button class="icon-btn" id="btn-fullscreen" title="FULLSCREEN / 全屏">⛶</button>
+        <button class="icon-btn" id="btn-close" title="CLOSE / 关闭">✕</button>
+    </div>
+
+    <canvas id="terrainCanvas"></canvas>
+
+    <div id="offline-screen">SYSTEM OFFLINE</div>
+
+    <div id="sidebar">
+        <div class="panel-section">
+            <div class="section-title">TERRAIN / 地形</div>
+            <div class="control-row"><span class="control-label">NOISE / 噪声</span><div class="input-group"><button class="adj-btn" onclick="adj('noise', -0.01)">-</button><input type="text" id="p-noise" value="0.10" readonly><button class="adj-btn" onclick="adj('noise', 0.01)">+</button></div></div>
+            <div class="control-row"><span class="control-label">AMP / 振幅</span><div class="input-group"><button class="adj-btn" onclick="adj('amp', -1)">-</button><input type="text" id="p-amp" value="25" readonly><button class="adj-btn" onclick="adj('amp', 1)">+</button></div></div>
+            <div class="control-row"><span class="control-label">GRID / 网格</span><div class="input-group"><button class="adj-btn" onclick="adj('grid', -2)">-</button><input type="text" id="p-grid" value="28" readonly><button class="adj-btn" onclick="adj('grid', 2)">+</button></div></div>
+            <div class="control-row"><span class="control-label">CELL / 单元格</span><div class="input-group"><button class="adj-btn" onclick="adj('cell', -1)">-</button><input type="text" id="p-cell" value="16" readonly><button class="adj-btn" onclick="adj('cell', 1)">+</button></div></div>
+        </div>
+
+        <div class="panel-section">
+            <div class="section-title">DISPLAY / 显示</div>
+            <div class="control-row"><span class="control-label">COLOR / 主题色</span><input type="color" id="color-main" value="#ff6600" onchange="updateColor('main', this.value)"></div>
+            <div class="control-row"><span class="control-label">WIDTH / 线宽</span><div class="input-group"><button class="adj-btn" onclick="adj('width', -0.5)">-</button><input type="text" id="p-width" value="1.00" readonly><button class="adj-btn" onclick="adj('width', 0.5)">+</button></div></div>
+            <div class="control-row"><span class="control-label">LINES / 线条</span>
+                <select id="p-lines" onchange="updateSelect('lines')">
+                    <option value="HORIZ">HORIZ / 水平</option>
+                    <option value="VERT">VERT / 垂直</option>
+                    <option value="BOTH">BOTH / 全部</option>
+                </select>
+            </div>
+            <div class="control-row"><span class="control-label">DUST / 空间尘埃</span><button class="toggle-btn" id="p-dust" onclick="toggle('dust')">ON / 开</button></div>
+        </div>
+
+        <div class="panel-section">
+            <div class="section-title">INSTANCES / 实体</div>
+            <div class="control-row"><span class="control-label">POINTS / 数据点</span><button class="toggle-btn" id="p-show" onclick="toggle('show')">ON / 开</button></div>
+            <div class="control-row"><span class="control-label">PT COLOR / 点颜色</span><input type="color" id="color-pts" value="#3399ff" onchange="updateColor('pts', this.value)"></div>
+            <div class="control-row"><span class="control-label">TYPE / 类型</span>
+                <select id="p-type" onchange="updateSelect('type')">
+                    <option value="NUM">NUM / 数字</option>
+                    <option value="DOTS">DOTS / 圆点</option>
+                    <option value="TRIANGLES">TRIS / 三角形</option>
+                </select>
+            </div>
+            <div class="control-row"><span class="control-label">SIZE / 大小</span><div class="input-group"><button class="adj-btn" onclick="adj('size', -1)">-</button><input type="text" id="p-size" value="11" readonly><button class="adj-btn" onclick="adj('size', 1)">+</button></div></div>
+            
+            <div class="control-row" style="margin-top: 15px; border-top: 1px dashed #333; padding-top: 10px;">
+                <span class="control-label" style="color:white; font-weight:bold;">SHIP / 飞船探测器</span>
+                <button class="toggle-btn" id="p-ship" onclick="toggle('ship')">ON / 开</button>
+            </div>
+        </div>
+
+        <div class="panel-section">
+            <div class="section-title">ANIM / 动画</div>
+            <div class="control-row"><span class="control-label">SPEED / 速度</span><div class="input-group"><button class="adj-btn" onclick="adj('speed', -0.001)">-</button><input type="text" id="p-speed" value="0.005" readonly><button class="adj-btn" onclick="adj('speed', 0.001)">+</button></div></div>
+            <div class="control-row"><span class="control-label">STATE / 状态</span><button class="toggle-btn" id="p-state" onclick="toggle('state')">RUN / 运行</button></div>
+        </div>
+    </div>
+
+    <script>
+        // --- 核心状态与参数配置 ---
+        const config = {
+            noise: 0.10,   
+            amp: 25,       
+            grid: 30,      
+            cell: 16,      
+            width: 1.0,    
+            lines: 'HORIZ',
+            show: true,    
+            type: 'NUM',   
+            size: 11,      
+            ship: true,
+            dust: true,    
+            speed: 0.005,  
+            state: true    
+        };
+
+        const colors = {
+            main: '#ff6600', 
+            pts: '#3399ff',  
+            bg: '#050505',
+            shipLine: '#ffffff',
+            shipFill: 'rgba(255, 255, 255, 0.1)'
+        };
+
+        let timeOffset = 0;
+        const simplex = new SimplexNoise(); 
+        let dustParticles = [];
+
+        // Canvas 设置
+        const canvas = document.getElementById('terrainCanvas');
+        const ctx = canvas.getContext('2d');
+        let cx, cy;
+
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            cx = canvas.width / 2;
+            cy = canvas.height / 2;
+        }
+        window.addEventListener('resize', resize);
+
+        // --- 全局交互控制逻辑 ---
+        const sidebar = document.getElementById('sidebar');
+        let isSidebarVisible = false;
+
+        // 点击/触摸画面切换侧边栏
+        canvas.addEventListener('click', () => {
+            isSidebarVisible = !isSidebarVisible;
+            if (isSidebarVisible) {
+                sidebar.classList.add('visible');
+            } else {
+                sidebar.classList.remove('visible');
+            }
+        });
+
+        // 全屏按钮逻辑
+        document.getElementById('btn-fullscreen').addEventListener('click', () => {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(err => {
+                    console.warn(`全屏请求被拒绝: ${err.message}`);
+                });
+            } else {
+                if (document.exitFullscreen) {
+                    document.exitFullscreen();
+                }
+            }
+        });
+
+        // 关闭按钮逻辑 (展示离线效果)
+        document.getElementById('btn-close').addEventListener('click', () => {
+            config.state = false; // 暂停动画
+            document.getElementById('top-controls').style.display = 'none';
+            sidebar.style.display = 'none';
+            canvas.style.display = 'none';
+            const offlineScreen = document.getElementById('offline-screen');
+            offlineScreen.style.display = 'flex';
+            // 尝试物理关闭窗口 (通常会被浏览器拦截)
+            setTimeout(() => window.close(), 1500); 
+        });
+
+        // --- 初始化受限于地形的尘埃粒子 ---
+        function initDust() {
+            dustParticles = [];
+            for(let i = 0; i < 200; i++) {
+                dustParticles.push({
+                    nx: Math.random() - 0.5, 
+                    ny: Math.random() - 0.5, 
+                    nz: Math.random(),       
+                    size: Math.random() * 1.5 + 0.5,
+                    speed: Math.random() * 150 + 50,
+                    alpha: Math.random() * 0.5 + 0.1
+                });
+            }
+        }
+        initDust();
+
+        // --- 伪3D投影 ---
+        function project(x, y, z) {
+            const angle = Math.PI / 6; 
+            const screenX = (x - y) * Math.cos(angle);
+            const screenY = (x + y) * Math.sin(angle) - z;
+            return { x: screenX + cx, y: screenY + cy + 80 }; 
+        }
+
+        // --- 颜色更新与全局UI颜色绑定 ---
+        window.updateColor = function(key, val) {
+            colors[key] = val;
+            if (key === 'main') {
+                document.documentElement.style.setProperty('--main-color', val);
+                updateUI(); 
+            }
+            if(!config.state) draw();
+        };
+
+        // --- 渲染逻辑 ---
+        function draw() {
+            ctx.fillStyle = colors.bg;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // 设置 8-bit 像素化风格的绘图属性
+            ctx.lineWidth = 2.0; 
+            ctx.lineCap = 'butt'; 
+            ctx.lineJoin = 'miter'; 
+
+            const { grid, cell, noise, amp, width, lines, show, type, size, ship, dust } = config;
+            const offset = (grid * cell) / 2;
+            const points = [];
+
+            // 1. 计算地形坐标
+            for (let i = 0; i < grid; i++) {
+                points[i] = [];
+                for (let j = 0; j < grid; j++) {
+                    const x = i * cell - offset;
+                    const y = j * cell - offset;
+                    let z = simplex.noise2D(i * noise, j * noise - timeOffset) * amp;
+                    points[i][j] = project(x, y, z);
+                    points[i][j].z = z; 
+                }
+            }
+
+            // 2. 绘制尘埃系统
+            if (dust) {
+                const maxZ = 150; 
+                for (let p of dustParticles) {
+                    if (config.state) {
+                        p.ny += (config.speed * p.speed) / (offset * 2);
+                        if (p.ny > 0.5) {
+                            p.ny = -0.5;
+                            p.nx = Math.random() - 0.5;
+                            p.nz = Math.random();
+                        }
+                    }
+                    
+                    let actualX = p.nx * offset * 2;
+                    let actualY = p.ny * offset * 2;
+                    let groundZ = simplex.noise2D(((p.nx + 0.5) * grid) * noise, ((p.ny + 0.5) * grid) * noise - timeOffset) * amp;
+                    let actualZ = groundZ + (p.nz * maxZ);
+
+                    let proj = project(actualX, actualY, actualZ);
+                    ctx.fillStyle = colors.shipLine;
+                    ctx.globalAlpha = p.alpha;
+                    ctx.beginPath();
+                    ctx.arc(proj.x, proj.y, p.size, 0, Math.PI*2);
+                    ctx.fill();
+                }
+                ctx.globalAlpha = 1.0;
+            }
+
+            ctx.lineWidth = width;
+
+            // 3. 绘制等高地形线
+            ctx.strokeStyle = colors.main;
+            if (lines === 'HORIZ' || lines === 'BOTH') {
+                for (let j = 0; j < grid; j++) {
+                    ctx.beginPath();
+                    for (let i = 0; i < grid; i++) {
+                        const p = points[i][j];
+                        if (i === 0) ctx.moveTo(p.x, p.y);
+                        else ctx.lineTo(p.x, p.y);
+                    }
+                    ctx.stroke();
+                }
+            }
+            if (lines === 'VERT' || lines === 'BOTH') {
+                for (let i = 0; i < grid; i++) {
+                    ctx.beginPath();
+                    for (let j = 0; j < grid; j++) {
+                        const p = points[i][j];
+                        if (j === 0) ctx.moveTo(p.x, p.y);
+                        else ctx.lineTo(p.x, p.y);
+                    }
+                    ctx.stroke();
+                }
+            }
+
+            // 4. 绘制数据散点
+            if (show) {
+                ctx.fillStyle = colors.pts;
+                ctx.strokeStyle = colors.pts;
+                ctx.font = `${size}px Courier New`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+
+                for (let i = 0; i < grid; i++) {
+                    for (let j = 0; j < grid; j++) {
+                        const p = points[i][j];
+                        if ((i % 2 === 0) && (j % 2 === 0)) {
+                            if (type === 'DOTS') {
+                                ctx.beginPath();
+                                ctx.arc(p.x, p.y, size / 4, 0, Math.PI * 2);
+                                ctx.fill();
+                            } else if (type === 'TRIANGLES') {
+                                const s = size / 2;
+                                ctx.beginPath();
+                                ctx.moveTo(p.x, p.y - s);
+                                ctx.lineTo(p.x - s, p.y + s);
+                                ctx.lineTo(p.x + s, p.y + s);
+                                ctx.closePath();
+                                ctx.stroke();
+                            } else {
+                                const val = p.z > 0 ? "1" : "0";
+                                ctx.fillText(val, p.x, p.y);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 5. 绘制悬浮飞船主体 (不带涡流)
+            if (ship) {
+                const shipX = 0;
+                const shipY = 0; 
+                
+                const centerI = grid / 2;
+                const centerJ = grid / 2;
+                const groundZ = simplex.noise2D(centerI * noise, centerJ * noise - timeOffset) * amp;
+                
+                const hoverOffset = 40 + Math.sin(Date.now() / 300) * 8; 
+                const shipZ = groundZ + hoverOffset;
+
+                const s = 15; 
+                const vertices = {
+                    nose:  {x: 0, y: -s*1.5, z: 0},       
+                    left:  {x: -s, y: s, z: 0},           
+                    right: {x: s, y: s, z: 0},            
+                    top:   {x: 0, y: s*0.2, z: s*0.8},    
+                    tail:  {x: 0, y: s, z: -s*0.2}        
+                };
+
+                const proj = {
+                    nose: project(shipX + vertices.nose.x, shipY + vertices.nose.y, shipZ + vertices.nose.z),
+                    left: project(shipX + vertices.left.x, shipY + vertices.left.y, shipZ + vertices.left.z),
+                    right: project(shipX + vertices.right.x, shipY + vertices.right.y, shipZ + vertices.right.z),
+                    top: project(shipX + vertices.top.x, shipY + vertices.top.y, shipZ + vertices.top.z),
+                    tail: project(shipX + vertices.tail.x, shipY + vertices.tail.y, shipZ + vertices.tail.z)
+                };
+
+                ctx.lineWidth = 1.5;
+                ctx.strokeStyle = colors.shipLine;
+                ctx.fillStyle = colors.shipFill;
+
+                function drawFace(p1, p2, p3) {
+                    ctx.beginPath();
+                    ctx.moveTo(p1.x, p1.y);
+                    ctx.lineTo(p2.x, p2.y);
+                    ctx.lineTo(p3.x, p3.y);
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.stroke();
+                }
+
+                drawFace(proj.left, proj.right, proj.tail); 
+                drawFace(proj.nose, proj.left, proj.right); 
+                drawFace(proj.left, proj.tail, proj.top);   
+                drawFace(proj.right, proj.tail, proj.top);  
+                drawFace(proj.nose, proj.left, proj.top);   
+                drawFace(proj.nose, proj.right, proj.top);  
+                
+                // 绘制地形扫描虚线
+                const groundProj = project(shipX, shipY, groundZ);
+                ctx.beginPath();
+                ctx.moveTo(proj.nose.x, proj.nose.y);
+                ctx.lineTo(groundProj.x, groundProj.y);
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+                ctx.setLineDash([2, 4]); 
+                ctx.stroke();
+                ctx.setLineDash([]); 
+
+                // 目标落点扫描圈
+                ctx.beginPath();
+                ctx.arc(groundProj.x, groundProj.y, 6, 0, Math.PI * 2);
+                ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+                ctx.stroke();
+            }
+        }
+
+        // --- 动画循环 ---
+        function animate() {
+            if (config.state) {
+                timeOffset += config.speed;
+            }
+            draw();
+            requestAnimationFrame(animate);
+        }
+
+        // --- UI 控制逻辑 ---
+        function updateUI() {
+            document.getElementById('p-noise').value = config.noise.toFixed(2);
+            document.getElementById('p-amp').value = config.amp;
+            document.getElementById('p-grid').value = config.grid;
+            document.getElementById('p-cell').value = config.cell;
+            document.getElementById('p-width').value = config.width.toFixed(2);
+            document.getElementById('p-size').value = config.size;
+            document.getElementById('p-speed').value = config.speed.toFixed(3);
+            
+            const btnStates = ['show', 'ship', 'dust', 'state'];
+            btnStates.forEach(key => {
+                const btn = document.getElementById(`p-${key}`);
+                const labels = {
+                    'show': ['ON / 开', 'OFF / 关'],
+                    'ship': ['ON / 开', 'OFF / 关'],
+                    'dust': ['ON / 开', 'OFF / 关'],
+                    'state': ['RUN / 运行', 'PAUSE / 暂停']
+                };
+                btn.textContent = config[key] ? labels[key][0] : labels[key][1];
+                btn.className = config[key] ? 'toggle-btn on' : 'toggle-btn';
+                if(config[key]) btn.style.backgroundColor = colors.main;
+                else btn.style.backgroundColor = ''; 
+            });
+        }
+
+        window.adj = function(key, delta) {
+            config[key] += delta;
+            if(key === 'grid') config.grid = Math.max(10, Math.min(60, config.grid));
+            if(key === 'cell') config.cell = Math.max(5, Math.min(30, config.cell));
+            if(key === 'noise') config.noise = Math.max(0.01, config.noise);
+            if(key === 'width') config.width = Math.max(0.1, config.width);
+            if(key === 'size') config.size = Math.max(5, config.size);
+            if(key === 'speed') config.speed = Math.max(0, config.speed);
+            
+            updateUI();
+            if(!config.state) draw();
+        }
+
+        window.updateSelect = function(key) {
+            config[key] = document.getElementById(`p-${key}`).value;
+            if(!config.state) draw();
+        }
+
+        window.toggle = function(key) {
+            config[key] = !config[key];
+            updateUI();
+            if(!config.state) draw();
+        }
+
+        // 启动
+        resize();
+        updateUI();
+        animate();
+    </script>
+</body>
+</html>
+    
+  </body>
+  
+</html>
