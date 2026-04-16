@@ -127,7 +127,7 @@
             height: 100vh;
             border-left: 1px solid var(--main);
             background: rgba(5, 5, 5, 0.94);
-            padding: 85px 22px 22px 22px; /* 避开顶部按钮 */
+            padding: 85px 22px 22px 22px;
             box-sizing: border-box;
             display: flex;
             flex-direction: column;
@@ -203,7 +203,6 @@
             flex: 1;
         }
         
-        /* 针对移动端触控优化的滑块 */
         input[type="range"] {
             flex: 1;
             height: 24px;
@@ -519,6 +518,15 @@
                 <div class="control-label">COLOR<span class="cn">轮廓线颜色</span></div>
                 <input type="color" id="meteor-color" class="color-picker" value="#ccaa88">
             </div>
+            <!-- 新增陨石显示模式下拉菜单 -->
+            <div class="control-row">
+                <div class="control-label">DISPLAY MODE<span class="cn">显示模式</span></div>
+                <select id="ui-meteor-mode">
+                    <option value="0">EDGES 边线</option>
+                    <option value="1">SILHOUETTE 剪影</option>
+                    <option value="2">SOLID 实体色块</option>
+                </select>
+            </div>
             <div class="control-row">
                 <div class="control-label">LOCK STYLE<span class="cn">锁定框样式</span></div>
                 <select id="ui-lock-style">
@@ -627,15 +635,17 @@
             lockDistance: 2.8,
             showLockLine: true,
             meteorLockStyle: 0,
-            lockDuration: 1.0
+            lockDuration: 1.0,
+            meteorDisplayMode: 1   // 新增: 0=边线, 1=剪影, 2=实体色块
         };
 
-        const LOCAL_STORAGE_KEY = 'terrain_console_config_v13';
+        const LOCAL_STORAGE_KEY = 'terrain_console_config_v14';
 
         function loadConfig() {
             const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
             if (saved) { try { Object.assign(config, JSON.parse(saved)); } catch(e) {} }
             if (config.meteorSize > 1.0) config.meteorSize = 0.3;
+            if (config.meteorDisplayMode === undefined) config.meteorDisplayMode = 1;
         }
         function saveConfig() { localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(config)); }
 
@@ -702,11 +712,11 @@
             return tex;
         }
 
-        // ---------- 全新陨石生成：随机多面体，纯黑实体 + 彩色轮廓线 ----------
+        // ---------- 全新陨石生成：支持三种显示模式 ----------
         function createMeteorMesh(color, size) {
             const group = new THREE.Group();
             
-            // 随机面数和形态 (参考文件二)
+            // 随机面数和形态
             const rings = Math.floor(Math.random() * 3) + 2;      // 2~4 环
             const segments = Math.floor(Math.random() * 5) + 4;   // 4~8 边
             
@@ -714,8 +724,8 @@
             const verts = [];
             
             // 两极
-            verts.push(new THREE.Vector3(0, baseScale * (0.9 + Math.random()*0.4), 0));   // 顶
-            verts.push(new THREE.Vector3(0, -baseScale * (0.9 + Math.random()*0.4), 0)); // 底
+            verts.push(new THREE.Vector3(0, baseScale * (0.9 + Math.random()*0.4), 0));
+            verts.push(new THREE.Vector3(0, -baseScale * (0.9 + Math.random()*0.4), 0));
             
             // 中间环
             for (let i = 1; i <= rings; i++) {
@@ -731,18 +741,16 @@
                 }
             }
             
-            // 构建三角形面 (索引)
+            // 构建三角形面
             const indices = [];
             const topIdx = 0;
             const bottomIdx = 1;
             
-            // 顶部扇形
             for (let j = 0; j < segments; j++) {
                 const next = (j + 1) % segments;
                 indices.push(topIdx, 2 + j, 2 + next);
             }
             
-            // 环间连接
             for (let i = 0; i < rings - 1; i++) {
                 const row0 = 2 + i * segments;
                 const row1 = 2 + (i + 1) * segments;
@@ -753,14 +761,13 @@
                 }
             }
             
-            // 底部扇形
             const lastRow = 2 + (rings - 1) * segments;
             for (let j = 0; j < segments; j++) {
                 const next = (j + 1) % segments;
                 indices.push(bottomIdx, lastRow + next, lastRow + j);
             }
             
-            // 轻微随机扰动顶点，使形状更自然
+            // 轻微随机扰动
             verts.forEach(v => {
                 v.x += (Math.random() - 0.5) * baseScale * 0.15;
                 v.y += (Math.random() - 0.5) * baseScale * 0.15;
@@ -774,15 +781,37 @@
             geometry.setIndex(indices);
             geometry.computeVertexNormals();
             
-            // 纯黑实体 (不受光照影响)
-            const blackMat = new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.DoubleSide });
-            const solidMesh = new THREE.Mesh(geometry, blackMat);
-            group.add(solidMesh);
+            const mode = config.meteorDisplayMode;
             
-            // 彩色轮廓线 (提取边缘)
-            const edges = new THREE.EdgesGeometry(geometry);
-            const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: color }));
-            group.add(line);
+            // 根据模式构建材质
+            if (mode === 0) { 
+                // 边线模式：只有轮廓线，无实体填充
+                const edges = new THREE.EdgesGeometry(geometry);
+                const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: color }));
+                group.add(line);
+                group.userData.outlineLine = line;
+                group.userData.solidMesh = null;
+            } else {
+                // 剪影(1)或实体色块(2)都有实体填充
+                let fillColor;
+                let fillMaterial;
+                if (mode === 1) {
+                    // 剪影：纯黑实体
+                    fillMaterial = new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.DoubleSide });
+                } else {
+                    // 实体色块：使用陨石颜色
+                    fillMaterial = new THREE.MeshBasicMaterial({ color: color, side: THREE.DoubleSide });
+                }
+                const solidMesh = new THREE.Mesh(geometry, fillMaterial);
+                group.add(solidMesh);
+                group.userData.solidMesh = solidMesh;
+                
+                // 轮廓线 (两种模式都保留)
+                const edges = new THREE.EdgesGeometry(geometry);
+                const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: color }));
+                group.add(line);
+                group.userData.outlineLine = line;
+            }
             
             // 锁定框 Sprite
             const spriteMat = new THREE.SpriteMaterial({ 
@@ -797,17 +826,52 @@
             group.add(sprite);
             
             group.userData.lockSprite = sprite;
-            group.userData.solidMesh = solidMesh;
-            group.userData.outlineLine = line;
-            
             return group;
         }
 
-        // 更新所有陨石轮廓线颜色
+        // 更新所有陨石的显示模式 (当切换模式时重新生成材质较复杂，简单处理：重新创建陨石? 或者直接遍历更新材质)
+        function applyMeteorDisplayMode(mode) {
+            meteors.forEach(m => {
+                // 简单方案：移除旧的几何体部分，重新构建。由于陨石数量不多，直接替换group内容。
+                const oldSolid = m.userData.solidMesh;
+                const oldLine = m.userData.outlineLine;
+                const color = config.meteorColor;
+                const size = m.userData.size;
+                const geometry = oldSolid ? oldSolid.geometry : oldLine.geometry;
+                
+                // 清除原有mesh/line
+                if (oldSolid) m.remove(oldSolid);
+                if (oldLine) m.remove(oldLine);
+                
+                if (mode === 0) {
+                    const edges = new THREE.EdgesGeometry(geometry);
+                    const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: color }));
+                    m.add(line);
+                    m.userData.outlineLine = line;
+                    m.userData.solidMesh = null;
+                } else {
+                    let fillColor = (mode === 1) ? 0x000000 : color;
+                    const fillMaterial = new THREE.MeshBasicMaterial({ color: fillColor, side: THREE.DoubleSide });
+                    const solidMesh = new THREE.Mesh(geometry, fillMaterial);
+                    m.add(solidMesh);
+                    m.userData.solidMesh = solidMesh;
+                    
+                    const edges = new THREE.EdgesGeometry(geometry);
+                    const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: color }));
+                    m.add(line);
+                    m.userData.outlineLine = line;
+                }
+            });
+        }
+
         function updateMeteorOutlineColor(colorHex) {
             meteors.forEach(m => {
                 if (m.userData.outlineLine) {
                     m.userData.outlineLine.material.color.set(colorHex);
+                }
+                // 如果是实体色块模式，实体颜色也随之改变
+                if (config.meteorDisplayMode === 2 && m.userData.solidMesh) {
+                    m.userData.solidMesh.material.color.set(colorHex);
                 }
             });
         }
@@ -927,6 +991,7 @@
             document.getElementById('ui-gravity-color').value = config.gravityColor;
             document.getElementById('meteor-color').value = config.meteorColor;
             document.getElementById('ui-lock-style').value = config.meteorLockStyle;
+            document.getElementById('ui-meteor-mode').value = config.meteorDisplayMode;
 
             syncMainColor(config.baseColor);
 
@@ -997,13 +1062,20 @@
             document.getElementById('ui-sstyle').addEventListener('change', e => { config.shipStyle = parseInt(e.target.value); ships.forEach(s => s.mesh.material.wireframe = (config.shipStyle === 0)); saveConfig(); });
             document.getElementById('ui-gravity-color').addEventListener('input', e => { config.gravityColor = e.target.value; updateGravityLines(); saveConfig(); });
             
-            // 陨石颜色：更新轮廓线
             document.getElementById('meteor-color').addEventListener('input', e => { 
                 config.meteorColor = e.target.value; 
                 updateMeteorOutlineColor(config.meteorColor);
                 saveConfig(); 
             });
             document.getElementById('ui-lock-style').addEventListener('change', e => { config.meteorLockStyle = parseInt(e.target.value); saveConfig(); });
+            
+            // 陨石显示模式切换
+            document.getElementById('ui-meteor-mode').addEventListener('change', e => {
+                const newMode = parseInt(e.target.value);
+                config.meteorDisplayMode = newMode;
+                applyMeteorDisplayMode(newMode);
+                saveConfig();
+            });
         }
 
         function init3D() {
@@ -1226,7 +1298,6 @@
                 }
 
                 m.position.addScaledVector(m.userData.velocity, delta);
-                // 旋转整个陨石组 (实体+轮廓线)
                 m.rotation.x += delta * 0.8;
                 m.rotation.y += delta * 0.6;
                 m.rotation.z += delta * 0.4;
